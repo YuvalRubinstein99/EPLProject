@@ -1,0 +1,326 @@
+---
+title: "Explainability"
+output: html_document
+date: "2024-01-25"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lmtest)
+library(sandwich)
+library(lfe)
+library(MASS)
+library(glmnet)
+library(pROC)
+library(ordinalNet)
+library(orf)
+library(ggplot2)
+
+```
+
+# Understanding distributions
+
+``` {r loading the data}
+data <- read_csv('train.csv')
+```
+
+```{r glimpse of the data}
+glimpse(data)
+  ```
+
+
+
+```{r plotting density plots}
+
+ggplot(data=data, aes(x=HomePlayer_Overall_mean)) +
+  geom_density(fill="tan1") + labs(title="OVR Distribution", xlab="Age") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Age_mean)) +
+  geom_density(fill="tan1") + labs(title="Age Distribution", xlab="Age") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Overall_sd)) +
+  geom_density(fill="tan1") + labs(title="Overall SD distribution", xlab="Age") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Weight_mean)) +
+  geom_density(fill="tan1") + labs(title="Weight Distribution", xlab="Age") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Height_mean)) +
+  geom_density(fill="tan1") + labs(title="Height Distribution", xlab="Age") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+What we can see is that mean values distributions are close to normal and the sd reminds us of the Xi^2 Distribution
+
+home_score and each of the features.
+This will help us understand which values need the log transformation
+all graphs are for per starting lineup
+```{r}
+ggplot(data = data, aes(x = log(HomePlayer_Overall_mean),
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Overall and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Weight_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Weight and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Height_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Height and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Age_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+```
+
+We can see only for the average rating of the starting 11, that it has positive effect, and for the others its pretty close to even 0.
+
+Why is it?
+
+Maybe  because for some areas of the age, raising the average could be beneficial, for example:
+A team who is full of very young and inexperienced players could be worse than a team full of 26-30 year old players.
+It could also be true for both height and weight. Weight is self explanatory, but height could give us the idea, that for example there is connection between player height and speed / agility.
+
+How can we show it?
+
+Maybe we can try when running our models, keep in mind adding a squared version of height weight and age
+
+```{r Summary of the attributes}
+
+summary(data$HomePlayer_Overall_mean)
+summary(data$HomePlayer_Overall_min)
+summary(data$HomePlayer_Overall_max)
+summary(data$HomePlayer_Overall_sd)
+summary(data$AwayPlayer_Overall_mean)
+summary(data$AwayPlayer_Overall_min)
+summary(data$AwayPlayer_Overall_max)
+summary(data$AwayPlayer_Overall_sd)
+```
+```{r modeling Home Score and away score while ignoring the bench}
+
+lm_model <- lm(data=data, formula = home_score ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_min + 
+                 HomePlayer_Overall_max + 
+                 HomePlayer_Overall_sd + 
+                 HomePlayer_Height_mean + I(HomePlayer_Height_mean^2)  +
+                 HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
+                 
+                 HomePlayer_Age_mean + I(HomePlayer_Age_mean^2)+
+               + home_team_name+ away_team_name)
+
+summary(lm_model)
+
+```
+
+```{r and for goal difference (homescore-awayscore)}
+
+data <- data%>%
+  mutate(GD = home_score-away_score)
+lm_model <- felm(data=data, formula = home_score ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_min + 
+                 HomePlayer_Overall_max + 
+                 HomePlayer_Overall_sd + I(HomePlayer_Overall_sd^2)+
+                 
+                 AwayPlayer_Overall_mean +
+                 AwayPlayer_Overall_min + 
+                 AwayPlayer_Overall_max + 
+                 AwayPlayer_Overall_sd +
+                 
+                 HomePlayer_Height_mean + I(HomePlayer_Height_mean^2)  +
+                 AwayPlayer_Height_mean + I(AwayPlayer_Height_mean^2)  +
+                 HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
+                 AwayPlayer_Weight_mean + I(AwayPlayer_Weight_mean^2)  +
+                 
+                 HomePlayer_Age_mean + I(HomePlayer_Age_mean^2)+
+                 AwayPlayer_Age_mean + I(AwayPlayer_Age_mean^2)
+               | home_team_name+away_team_name | 0 | 0)
+
+summary(lm_model)
+```
+
+```{r checking maybe its a matter of ratio}
+ggplot(data = data, aes(x = HomePlayer_Overall_mean/AwayPlayer_Overall_mean,
+                       y = GD)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Overall and the home_score")
+
+ggplot(data = data, aes(x = HomePlayer_Overall_min/AwayPlayer_Overall_min,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Overall and the home_score")
+
+ggplot(data = data, aes(x = log(HomePlayer_Overall_sd/AwayPlayer_Overall_sd),
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Overall and the home_score")
+
+
+```
+And what if we do log transformation on the Overall variables
+
+```{r Log transformation where needed 2}
+
+
+lm_model <- lm(data=data, formula = GD ~
+                 log(HomePlayer_Overall_mean )+
+                 HomePlayer_Overall_sd+ 
+                 log(HomePlayer_Overall_min)+
+                  log(HomePlayer_Overall_max)+
+               log(AwayPlayer_Overall_min)+
+                  log(AwayPlayer_Overall_max)+
+               
+                 log(AwayPlayer_Overall_mean) +
+                 AwayPlayer_Overall_sd  +
+                 
+                 HomePlayer_Height_mean + I(HomePlayer_Height_mean^2)  +
+                 AwayPlayer_Height_mean + I(AwayPlayer_Height_mean^2)  +
+                 HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
+                 AwayPlayer_Weight_mean + I(AwayPlayer_Weight_mean^2)  +
+                 
+                 HomePlayer_Age_mean + I(HomePlayer_Age_mean^2)+
+                 AwayPlayer_Age_mean + I(AwayPlayer_Age_mean^2)
+               + home_team_name+ away_team_name)
+
+  summary(lm_model)
+```
+
+
+and what if we include the bench?
+
+its possible to see that the main effects are from the starting lineups, which is not surprsing at all.
+
+now without a premise on the causal effects, do we really need the min max values?
+
+```{r Log transformation where needed}
+
+
+lm_model <- lm(data=data, formula = GD ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_sd + 
+                 AwayPlayer_Overall_mean +
+                 AwayPlayer_Overall_sd  +
+                 HomePlayer_Height_mean + I(HomePlayer_Height_mean^2)  +
+                 AwayPlayer_Height_mean + I(AwayPlayer_Height_mean^2)  +
+                 HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
+                 AwayPlayer_Weight_mean + I(AwayPlayer_Weight_mean^2)  +
+                 HomePlayer_Age_mean + I(HomePlayer_Age_mean^2)+
+                 AwayPlayer_Age_mean + I(AwayPlayer_Age_mean^2)
+               + home_team_name+ away_team_name)
+  summary(lm_model)
+  
+  
+  ### and bmi
+  
+data$HomePlayer_MHeight_mean = data$HomePlayer_Height_mean / 100
+data$AwayPlayer_MHeight_mean = data$AwayPlayer_Height_mean / 100
+
+data$Home_BMI = data$HomePlayer_Weight_mean / data$HomePlayer_MHeight_mean^2
+data$Away_BMI = data$AwayPlayer_Weight_mean / data$AwayPlayer_MHeight_mean^2
+lm_model <- lm(data=data, formula = GD ~
+                 HomePlayer_Overall_max+
+               HomePlayer_Overall_min +
+              AwayPlayer_Overall_min+
+               AwayPlayer_Overall_max+
+                 HomePlayer_Overall_mean + HomePlayer_bench_Overall_mean +
+                 HomePlayer_Overall_sd + 
+                 AwayPlayer_Overall_mean +
+                 AwayPlayer_Overall_sd  +
+                 HomePlayer_Height_mean + I(HomePlayer_Height_mean^2)  +
+                 AwayPlayer_Height_mean + I(AwayPlayer_Height_mean^2)  +
+                 HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
+                 AwayPlayer_Weight_mean + I(AwayPlayer_Weight_mean^2)  +
+                 HomePlayer_Age_mean + I(HomePlayer_Age_mean^2)+
+                 AwayPlayer_Age_mean + I(AwayPlayer_Age_mean^2) 
+               + home_team_name+ away_team_name)
+  summary(lm_model)
+  
+```
+
+
+While looking at the adjusted R^2, the best models are the ones that take into account only the mean and sd, is enough.
+
+looking across the models we also see one thing that can raise suspicions and that is how EA ranks the players. since looking at the standard deviation has a *poisitive* effect on the team, it could lead us the think that the ea ranking system of players is such with no deminishing returns.
+
+lets look if we can assume that GD is something that is close to normal distribution
+
+
+
+We will try 2 different approaches in our ML probability extraction
+
+1. Assume GD is normal, use the regression output as a mean, and by that extract probabilities
+
+2. Assume home_score and away_score are poisson variables and as such use the regression outputs of both home_score and away_score, and extract them using a skellam distribution
+
+```{r checking cobb douglass like}
+data$GD = data$home_score - data$away_score
+new_lm <- lm(data=data, formula = home_score ~ log(HomePlayer_Dribbling_mean) + 
+               log(HomePlayer_Shooting_mean) + log(HomePlayer_Passing_mean) + log(HomePlayer_Physicality_mean)+
+               log(HomePlayer_Defending_mean) + log(HomePlayer_Pace_mean) + log(AwayPlayer_Dribbling_mean) + 
+               log(AwayPlayer_Shooting_mean) + log(AwayPlayer_Passing_mean) + log(AwayPlayer_Physicality_mean)+
+               log(AwayPlayer_Defending_mean) + log(AwayPlayer_Pace_mean) + HomePlayer_Age_mean + AwayPlayer_Age_mean + I(HomePlayer_Age_mean^2) +I(AwayPlayer_Age_mean^2) + home_team_name + away_team_name)
+summary(new_lm)
+
+```
+
+```{r without log}
+data$GD = data$home_score - data$away_score
+new_lm <- lm(data=data, formula = home_score ~  (HomePlayer_Dribbling_mean) + 
+                (HomePlayer_Shooting_mean) +  (HomePlayer_Passing_mean) +  (HomePlayer_Physicality_mean)+
+                (HomePlayer_Defending_mean) +  (HomePlayer_Pace_mean) +  (AwayPlayer_Dribbling_mean) + 
+                (AwayPlayer_Shooting_mean) +  (AwayPlayer_Passing_mean) +  (AwayPlayer_Physicality_mean)+
+                (AwayPlayer_Defending_mean) +  (AwayPlayer_Pace_mean) + HomePlayer_Age_mean + AwayPlayer_Age_mean + I(HomePlayer_Age_mean^2) +I(AwayPlayer_Age_mean^2) + home_team_name + away_team_name)
+summary(new_lm)
+```
+
+```{r poisson now}
+pois_reg <- glm(data=data, formula = home_score ~  log(HomePlayer_Dribbling_mean) + 
+                (HomePlayer_Shooting_mean) +  log(HomePlayer_Passing_mean) +  (HomePlayer_Physicality_mean)+
+                (HomePlayer_Defending_mean) +  (HomePlayer_Pace_mean) +  (AwayPlayer_Dribbling_mean) + 
+                (AwayPlayer_Shooting_mean) +  (AwayPlayer_Passing_mean) +  (AwayPlayer_Physicality_mean)+
+                (AwayPlayer_Defending_mean) +  (AwayPlayer_Pace_mean) + HomePlayer_Age_mean + AwayPlayer_Age_mean + I(HomePlayer_Age_mean^2) +I(AwayPlayer_Age_mean^2) + home_team_name + away_team_name, family='poisson')
+
+summary(pois_reg)
+
+simple_lm <- lm(data=data, formula = home_score ~  log(HomePlayer_Dribbling_mean) + 
+                (HomePlayer_Shooting_mean) +  log(HomePlayer_Passing_mean) +  (HomePlayer_Physicality_mean)+
+                (HomePlayer_Defending_mean) +  (HomePlayer_Pace_mean) +  (AwayPlayer_Dribbling_mean) + 
+                (AwayPlayer_Shooting_mean) +  (AwayPlayer_Passing_mean) +  (AwayPlayer_Physicality_mean)+
+                (AwayPlayer_Defending_mean) +  (AwayPlayer_Pace_mean) + HomePlayer_Age_mean + AwayPlayer_Age_mean + I(HomePlayer_Age_mean^2) +I(AwayPlayer_Age_mean^2) + home_team_name + away_team_name)
+summary(simple_lm)
+summary(pois_reg)
+```
+```{r overall poisson}
+
+pois_ovr <- glm(data=data, formula = home_score ~
+                  HomePlayer_Overall_max+AwayPlayer_Overall_max+
+                 I(HomePlayer_Overall_max /AwayPlayer_Overall_max)  +
+                  HomePlayer_Overall_min+AwayPlayer_Overall_min+
+                I(HomePlayer_Overall_min/AwayPlayer_Overall_min) +
+                 I(HomePlayer_Overall_mean/AwayPlayer_Overall_mean) +
+                  AwayPlayer_Overall_mean +HomePlayer_Overall_mean +
+                 HomePlayer_Overall_sd + 
+                 AwayPlayer_Overall_mean +
+                 AwayPlayer_Overall_sd
+               + home_team_name+ away_team_name, family = 'poisson')
+  summary(pois_ovr)
+  
+  pois_ovr <- glm(data=data, formula = home_score ~
+                 I(HomePlayer_Overall_mean/AwayPlayer_Overall_mean) 
+                +I(HomePlayer_Overall_sd/AwayPlayer_Overall_sd)
+               + home_team_name+ away_team_name, family = 'poisson')
+  summary(pois_ovr)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,357 @@
+---
+title: "Explainability"
+output: html_document
+date: "2024-01-25"
+---
+
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lmtest)
+library(sandwich)
+library(lfe)
+library(MASS)
+library(glmnet)
+library(pROC)
+library(ordinalNet)
+library(orf)
+library(ggplot2)
+rm = list(ls())
+```
+
+# Understanding distributions
+
+``` {r loading the data, include=FALSE}
+
+data <- read_csv('train.csv')
+```
+
+
+
+
+
+```{r plotting density plots}
+
+ggplot(data=data, aes(x=HomePlayer_Overall_mean)) +
+  geom_density(fill="tan1") + labs(title="OVR Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Age_mean)) +
+  geom_density(fill="tan1") + labs(title="Age Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Overall_sd)) +
+  geom_density(fill="tan1") + labs(title="Overall SD distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Weight_mean)) +
+  geom_density(fill="tan1") + labs(title="Weight Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Height_mean)) +
+  geom_density(fill="tan1") + labs(title="Height Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+
+
+```
+
+What we can see is that mean values distributions are close to normal and the sd reminds us of the Xi^2 Distribution
+
+home_score and each of the features.
+This will help us understand which values need the log transformation
+all graphs are for per starting lineup
+```{r}
+ggplot(data = data, aes(x = HomePlayer_Overall_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Overall and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Weight_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Weight and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Height_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Height and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Age_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+
+ggplot(data = data, aes(x = home_GD_prior- away_GD_prior,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+
+ggplot(data = data, aes(x = home_Points_form_pw,
+                       y = log(home_score+1))) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+
+ggplot(data = data, aes(x = home_points_to_rel,
+                       y = away_points_to_rel)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+```
+
+We can see only for the average rating of the starting 11, that it has positive effect, and for the others its pretty close to even 0.
+
+Why is it?
+
+Maybe  because for some areas of the age, raising the average could be beneficial, for example:
+A team who is full of very young and inexperienced players could be worse than a team full of 26-30 year old players.
+It could also be true for both height and weight. Weight is self explanatory, but height could give us the idea, that for example there is connection between player height and speed / agility.
+
+How can we show it?
+
+Maybe we can try when running our models, keep in mind adding a squared version of height weight and age
+```{r checking if how to model the teams}
+teams_lm = lm(data=data, formula =  I(home_score-away_score) ~
+                home_team_name+away_team_name)
+summary(teams_lm)
+data <- data%>%
+  mutate(win = ifelse(home_score>away_score, 1, 0))
+
+# and one without interactions
+teams_lr = glm(data=data, formula = win ~ home_team_name + away_team_name, family='binomial')
+summary(teams_lr)
+
+```
+
+```{r modeling Home Score and away score while ignoring the bench}
+
+lm_model <- felm(data=data, formula = home_score ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_min + 
+                 HomePlayer_Overall_max + 
+                 HomePlayer_Overall_sd + 
+                 HomePlayer_Height_mean + I(HomePlayer_Height_mean^2)  +
+                 HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
+                 home_Points_prior + away_Points_prior+
+                 HomePlayer_Age_mean + I(HomePlayer_Age_mean^2) | 
+                home_team_name+ away_team_name | 0 | 0)
+
+summary(lm_model)
+
+```
+```{r modeling Home Score and away score while ignoring the bench and checking points}
+
+lm_model <- felm(data=data, formula = home_score ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_min + 
+                 HomePlayer_Overall_max + 
+                 HomePlayer_Overall_sd + 
+                 HomePlayer_Height_mean + I(HomePlayer_Height_mean^2)  +
+                 HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
+                 home_Points_prior + away_Points_prior+
+                 HomePlayer_Age_mean + I(HomePlayer_Age_mean^2) | 
+                home_team_name+ away_team_name | 0 | 0)
+
+summary(lm_model)
+
+```
+We can also use form instead of just the points prior
+why can this help? beacuse a teams form can change for certain periods in a season which can absolutely affect the result of a match. 
+```{r and for goal difference (homescore-awayscore)}
+
+data <- data%>%
+  mutate(GD = home_score-away_score)
+lm_model <- felm(data=data, formula = I(home_score-away_score) ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_min* 
+                 HomePlayer_Overall_max + 
+                
+                 AwayPlayer_Overall_mean +
+                 AwayPlayer_Overall_min* 
+                 AwayPlayer_Overall_max +
+ home_Points_form_pw +away_Points_form_pw
+               | home_team_name | 0 | home_team_name)
+
+summary(lm_model)
+```
+```{r and for goal difference (homescore-awayscore) with gd instead of points}
+
+data <- data%>%
+  mutate(GD = home_score-away_score)
+lm_model <- felm(data=data, formula = I(home_score-away_score) ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_min* 
+                 HomePlayer_Overall_max + 
+                
+                 AwayPlayer_Overall_mean +
+                 AwayPlayer_Overall_min* 
+                 AwayPlayer_Overall_max +
+                 home_GD_form + away_GD_form
+               | home_team_name | 0 | home_team_name)
+
+summary(lm_model)
+```
+```{r and for goal difference (homescore-awayscore) while looking at 3rd best and worst}
+
+data <- data%>%
+  mutate(GD = home_score-away_score)
+lm_model <- felm(data=data, formula = GD ~
+                HomePlayer_Overall_mean+
+              HomePlayer_Overall_sd +
+                AwayPlayer_Overall_mean+
+                AwayPlayer_Overall_sd+
+                home_GD_form_pw + 
+                away_GD_form_pw 
+               | home_team_name | 0 | home_team_name)
+
+  summary(lm_model)
+  
+  
+lm_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean
+                +AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                home_Points_form_pw + 
+                away_Points_form_pw
+               | home_team_name | 0 | home_team_name)
+
+  summary(lm_model)
+  
+  lm_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean_ln + AwayPlayer_Overall_mean_ln+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                home_Points_form_pw + 
+                away_Points_form_pw 
+               | home_team_name | 0 | home_team_name)
+
+  summary(lm_model)
+  
+lm_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean_sqrt + AwayPlayer_Overall_mean_sqrt+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                home_GD_form_pw + home_points_to_ucl+home_points_to_rel+
+                away_GD_form_pw + away_points_to_ucl+away_points_to_rel
+               | home_team_name | 0 | home_team_name)
+
+  summary(lm_model)
+  
+data$min_max_diff = data$HomePlayer_Overall_max - data$HomePlayer_Overall_min
+
+summary(data$min_max_diff)
+
+ggplot(data=data, aes(x=min_max_diff)) +
+  geom_density(fill="tan1") + labs(title="Home Max-Min OVR Distribution", xlab="HomePlayer_Overall_Max-HomePlayer_Overall_Min") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+What is interesting to see, is that we can calculate derivatives for marginal utility of increasing the min and the max, and we get there are certain fields, where improving the best player is worth more than improving our worse player! this shows the increasing marginal utility of player  talent (in certain areas).
+
+ 
+An interesting result in our data shows that the Standard deviation has a positive effect on the teams performance: this can show us that there might be no diminishing returns on talent in our football team, since if there was, the standard deviation would cause harm to our team.
+Another proof of having
+
+Now lets see another thing, whether or not the points prior to the match have a quadratic effect, intuition:
+if a team already has the championship, they won't take the match seriously, and same if the team is relegated, however there will be a similar motivation for near relegation or top 4 matches
+
+```{r }
+
+lm_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                home_GD_form_pw + 
+                away_GD_form_pw
+               | home_team_name + away_team_name | 0 | home_team_name)
+
+
+staying_league_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                +home_GD_form_pw + away_GD_form_pw+
+                home_points_to_rel + away_points_to_rel
+               | home_team_name + away_team_name | 0 |home_team_name)
+
+
+tr_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                +home_GD_form_pw + away_GD_form_pw+
+                home_points_to_championship + away_points_to_championship
+               | home_team_name + away_team_name | 0 | home_team_name)
+summary(lm_model)
+summary(tr_model)
+summary(staying_league_model)
+```
+
+Now lets keep in mind:
+
+
+```{r with both forms}
+sqrt_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+                  HomePlayer_Overall_mean_sqrt+AwayPlayer_Overall_mean_sqrt+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                home_Points_prior + 
+                away_Points_form  
+                | home_team_name + away_team_name | 0 | home_team_name)
+
+
+ln_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+                  HomePlayer_Overall_mean_ln+AwayPlayer_Overall_mean_ln+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                home_GD_form_pw + 
+                away_GD_form_pw  
+                | home_team_name + away_team_name | 0 | home_team_name)
+
+both_model <- felm(data=data, formula = I(home_score-away_score) ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+                  HomePlayer_Overall_mean_ln+AwayPlayer_Overall_mean_ln+
+                  HomePlayer_Overall_mean_sqrt+AwayPlayer_Overall_mean_sqrt+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                home_GD_form_pw + 
+                away_GD_form_pw  
+                | home_team_name + away_team_name | 0 | home_team_name)
+summary(sqrt_model)
+summary(ln_model)
+summary(both_model)
+```
+
+Now the weird part is that we see teams with a home "disadvantage", this is odd, this might be due to them being biased compared to the causal effect, and the fact that they might be affected from stuff like budget for example.
+
+```{r now only poisson regressions on home_score and away_score}
+hg_reg = glm(data=data, formula = home_score ~ HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                +home_GD_form_pw + away_GD_form_pw + home_team_name + away_team_name, family='poisson')
+
+ag_reg = glm(data=data, formula = away_score ~ HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                +home_Points_prior + away_GD_form_pw + home_team_name + away_team_name, family='poisson')
+summary(ag_reg)
+summary(hg_reg)
+
+
+# Stepwise selection for hg_reg model
+step_hg_reg <- stepAIC(hg_reg, direction = "both")
+
+# Stepwise selection for ag_reg model
+step_ag_reg <- stepAIC(ag_reg, direction = "both")
+
+# Summaries of the models after stepwise selection
+summary(step_hg_reg)
+summary(step_ag_reg)
+
+hg_reg = glm(data=data, formula = home_score ~ HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                +home_GD_form_pw + away_GD_form_pw, family='poisson')
+
+ag_reg = glm(data=data, formula = away_score ~ HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                +home_Points_prior + away_GD_form_pw, family='poisson')
+
+summary(ag_reg)
+summary(hg_reg)
+```
