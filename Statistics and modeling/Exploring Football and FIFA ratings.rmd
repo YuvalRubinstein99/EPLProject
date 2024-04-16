@@ -1,6 +1,8 @@
 ---
-title: "Explainability"
-output: html_document
+title: "Exploring FIFA Ratings and motivation"
+output:
+  pdf_document: default
+  html_document: default
 date: "2024-01-25"
 ---
 
@@ -25,6 +27,8 @@ rm = list(ls())
 ``` {r loading the data, include=FALSE}
 
 data <- read_csv('train.csv')
+data <- data%>%
+  mutate(fixture = paste(home_team_name, away_team_name, sep=' v ' ))
 ```
 
 
@@ -126,11 +130,12 @@ lm_model <- felm(data=data, formula = home_score ~
                  HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
                  home_Points_prior + away_Points_prior+
                  HomePlayer_Age_mean + I(HomePlayer_Age_mean^2) | 
-                home_team_name+ away_team_name | 0 | 0)
+                home_team_name+ away_team_name  + fixture | 0 | 0)
 
 summary(lm_model)
 
 ```
+
 ```{r modeling Home Score and away score while ignoring the bench and checking points}
 
 lm_model <- felm(data=data, formula = home_score ~
@@ -142,7 +147,7 @@ lm_model <- felm(data=data, formula = home_score ~
                  HomePlayer_Weight_mean + I(HomePlayer_Weight_mean^2)  +
                  home_Points_prior + away_Points_prior+
                  HomePlayer_Age_mean + I(HomePlayer_Age_mean^2) | 
-                home_team_name+ away_team_name | 0 | 0)
+                home_team_name+ away_team_name  + fixture| 0 | 0)
 
 summary(lm_model)
 
@@ -162,7 +167,7 @@ lm_model <- felm(data=data, formula = I(home_score-away_score) ~
                  AwayPlayer_Overall_min* 
                  AwayPlayer_Overall_max +
  home_Points_form_pw +away_Points_form_pw
-               | home_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
 summary(lm_model)
 ```
@@ -179,7 +184,7 @@ lm_model <- felm(data=data, formula = I(home_score-away_score) ~
                  AwayPlayer_Overall_min* 
                  AwayPlayer_Overall_max +
                  home_GD_form + away_GD_form
-               | home_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
 summary(lm_model)
 ```
@@ -194,7 +199,7 @@ lm_model <- felm(data=data, formula = GD ~
                 AwayPlayer_Overall_sd+
                 home_GD_form_pw + 
                 away_GD_form_pw 
-               | home_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
   summary(lm_model)
   
@@ -206,7 +211,7 @@ lm_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 home_Points_form_pw + 
                 away_Points_form_pw
-               | home_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
   summary(lm_model)
   
@@ -216,7 +221,7 @@ lm_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 home_Points_form_pw + 
                 away_Points_form_pw 
-               | home_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
   summary(lm_model)
   
@@ -226,7 +231,7 @@ lm_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 home_GD_form_pw + home_points_to_ucl+home_points_to_rel+
                 away_GD_form_pw + away_points_to_ucl+away_points_to_rel
-               | home_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
   summary(lm_model)
   
@@ -255,7 +260,7 @@ lm_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 home_GD_form_pw + 
                 away_GD_form_pw
-               | home_team_name + away_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
 
 staying_league_model <- felm(data=data, formula = I(home_score-away_score) ~
@@ -264,7 +269,7 @@ staying_league_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 +home_GD_form_pw + away_GD_form_pw+
                 home_points_to_rel + away_points_to_rel
-               | home_team_name + away_team_name | 0 |home_team_name)
+               | home_team_name + away_team_name + fixture | 0 |home_team_name)
 
 
 tr_model <- felm(data=data, formula = I(home_score-away_score) ~
@@ -273,7 +278,7 @@ tr_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 +home_GD_form_pw + away_GD_form_pw+
                 home_points_to_championship + away_points_to_championship
-               | home_team_name + away_team_name | 0 | home_team_name)
+               | home_team_name + away_team_name + fixture | 0 | home_team_name)
 summary(lm_model)
 summary(tr_model)
 summary(staying_league_model)
@@ -290,7 +295,7 @@ sqrt_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 home_Points_prior + 
                 away_Points_form  
-                | home_team_name + away_team_name | 0 | home_team_name)
+                | home_team_name + away_team_name  + fixture| 0 | home_team_name)
 
 
 ln_model <- felm(data=data, formula = I(home_score-away_score) ~
@@ -300,7 +305,7 @@ ln_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 home_GD_form_pw + 
                 away_GD_form_pw  
-                | home_team_name + away_team_name | 0 | home_team_name)
+                | home_team_name + away_team_name + fixture | 0 | home_team_name)
 
 both_model <- felm(data=data, formula = I(home_score-away_score) ~
                 HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
@@ -310,7 +315,7 @@ both_model <- felm(data=data, formula = I(home_score-away_score) ~
                 AwayPlayer_Overall_sd+
                 home_GD_form_pw + 
                 away_GD_form_pw  
-                | home_team_name + away_team_name | 0 | home_team_name)
+                | home_team_name + away_team_name  + fixture| 0 | home_team_name)
 summary(sqrt_model)
 summary(ln_model)
 summary(both_model)
@@ -355,3 +360,5 @@ ag_reg = glm(data=data, formula = away_score ~ HomePlayer_Overall_mean + AwayPla
 summary(ag_reg)
 summary(hg_reg)
 ```
+
+
