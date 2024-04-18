@@ -1,0 +1,217 @@
+---
+title: "Exploring FIFA Ratings and motivation"
+output:
+  pdf_document: default
+  html_document: default
+date: "2024-01-25"
+---
+
+
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(lmtest)
+library(sandwich)
+library(lfe)
+library(MASS)
+library(glmnet)
+library(pROC)
+library(ordinalNet)
+library(orf)
+library(ggplot2)
+library(car)
+rm = list(ls())
+```
+
+``` {r loading the data, include=FALSE}
+
+data <- read_csv('train.csv')
+oos_data <- read_csv("test.csv")
+```
+
+
+```{r plotting density plots}
+
+ggplot(data=data, aes(x=HomePlayer_Overall_mean)) +
+  geom_density(fill="tan1") + labs(title="OVR Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Age_mean)) +
+  geom_density(fill="tan1") + labs(title="Age Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Overall_sd)) +
+  geom_density(fill="tan1") + labs(title="Overall SD distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Weight_mean)) +
+  geom_density(fill="tan1") + labs(title="Weight Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+ggplot(data=data, aes(x=HomePlayer_Height_mean)) +
+  geom_density(fill="tan1") + labs(title="Height Distribution") + theme(plot.title = element_text(hjust = 0.5))
+
+
+
+```
+
+
+```{r}
+ggplot(data = data, aes(x = HomePlayer_Overall_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Overall and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Weight_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Weight and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Height_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Height and the home_score")
+ggplot(data = data, aes(x = HomePlayer_Age_mean,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+
+ggplot(data = data, aes(x = home_GD_prior- away_GD_prior,
+                       y = home_score)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+
+ggplot(data = data, aes(x = home_Points_form_pw,
+                       y = log(home_score+1))) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+
+ggplot(data = data, aes(x = home_points_to_rel,
+                       y = away_points_to_rel)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home Age and the home_score")
+```
+
+Now we will see different models to check the following:
+
+1. Does the standard deviation have a positive effect on the teams performance? 
+2. How is the motivation to not get relegated affects the team different than the motivation to reach top 4 / win the league
+3. Which is better in estimating form? Goal differences before the game or points gained
+
+First we will see which is better at estimating form: points form or GD form over the past 5-6 (per week)
+```{r first seeing a model only with standard deviation with form}
+data <- data%>%
+  mutate(GD = home_score-away_score)
+GD_model <- felm(data=data, formula = GD ~
+                HomePlayer_Overall_mean+
+              HomePlayer_Overall_sd +
+                AwayPlayer_Overall_mean+
+                AwayPlayer_Overall_sd+
+                home_GD_form_pw + 
+                away_GD_form_pw 
+               | home_team_name + away_team_name | 0 | home_team_name)
+
+Points_model <- felm(data=data, formula = GD ~
+                HomePlayer_Overall_mean+
+              HomePlayer_Overall_sd +
+                AwayPlayer_Overall_mean+
+                AwayPlayer_Overall_sd+
+                home_Points_form_pw + 
+                away_Points_form_pw 
+               | home_team_name + away_team_name | 0 | home_team_name)
+
+summary(GD_model)
+summary(Points_model)
+```
+Now we see looking at the adjusted R squared for the full model, it's better off to use to GD which makes sense because there will be instances where 2 teams are in the same form point wise but one team scores more goals.
+
+Now we will add motivation to the mix:
+
+```{r adding motivation}
+staying_league_model <- felm(data=data, formula = GD ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                +home_GD_form_pw + away_GD_form_pw+
+                home_points_to_rel + away_points_to_rel
+               | home_team_name + away_team_name | 0 |home_team_name)
+
+
+tr_model <- felm(data=data, formula = GD ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                 +home_GD_form_pw + away_GD_form_pw+
+                home_points_to_championship + away_points_to_championship
+               | home_team_name + away_team_name | 0 | home_team_name)
+
+gi_model <- felm(data=data, formula = GD ~
+                HomePlayer_Overall_mean + AwayPlayer_Overall_mean+
+              HomePlayer_Overall_sd+
+                AwayPlayer_Overall_sd+
+                 +home_GD_form_pw + away_GD_form_pw+
+                home_match_importance + away_match_importance
+               | home_team_name + away_team_name | 0 | home_team_name)
+
+summary(gi_model)
+summary(tr_model)
+summary(staying_league_model)
+
+linearHypothesis(gi_model, c("home_match_importance= 0", "away_match_importance=0"))
+linearHypothesis(tr_model, c("home_points_to_championship= 0", "away_points_to_championship=0"))
+linearHypothesis(staying_league_model, c("home_points_to_rel= 0", "away_points_to_rel=0"))
+
+ggplot(data = data, aes(x = HomePlayer_Overall_mean,
+                       y = home_points_to_rel)) +
+  geom_point() + stat_smooth(method = "lm") +
+  ggtitle("Home OVR mean and match importance")
+```
+
+Naively we can say there is a problem when motivation, but that can be due to the high correlations between both the teams quality, and their position in the league, and we can gain information mainly from non linear models that can use such information to predict better.
+
+```{r and looking at min max}
+lm_model <- felm(data=data, formula = GD ~
+                 HomePlayer_Overall_mean +
+                 HomePlayer_Overall_min* 
+                 HomePlayer_Overall_max + 
+                
+                 AwayPlayer_Overall_mean +
+                 AwayPlayer_Overall_min* 
+                 AwayPlayer_Overall_max +
+ home_GD_form_pw +away_GD_form_pw
+               | home_team_name + away_team_name | 0 | home_team_name)
+summary(lm_model)
+res_model <- felm(data=data, formula = GD ~
+                 HomePlayer_Overall_mean +
+                 AwayPlayer_Overall_mean +
+ home_GD_form_pw +away_GD_form_pw
+               | home_team_name + away_team_name | 0 | home_team_name)
+summary(res_model)
+summary(lm_model)
+
+
+```
+Now we can do an F test to see weather or not min-max variables are statistically significant together, as for the restricted model, we can say that these values are statistically significant together
+
+now if we derive by the max and min for the home team (assuming its pretty much the same effect on the away team) we will get:
+-0.1803598+0.0018678max by min
+and -0.1222168 +0.0018678min by max
+
+lets look when the marginal effect for increasing our best player is greater than the marginal effect of increasing our worst:
+-0.1222168 +0.0018678min > -0.1803598+0.0018678max
+and we will get it holds for max-min < 31.1291 (https://www.wolframalpha.com/input?i2d=true&i=-0.1222168+%2B0.0018678x+%3E+-0.1803598%2B0.0018678y when x is the min and y is the max)
+
+now the funny thing is, it holds for almost all premier league teams, lets show below:
+
+```{r summarize min-max gaps}
+
+  
+data$min_max_diff = data$HomePlayer_Overall_max - data$HomePlayer_Overall_min
+
+summary(data$min_max_diff)
+
+ggplot(data=data, aes(x=min_max_diff)) +
+  geom_density(fill="tan1") + labs(title="Home Max-Min OVR Distribution", xlab="HomePlayer_Overall_Max-HomePlayer_Overall_Min") + theme(plot.title = element_text(hjust = 0.5))
+```
+
+and what we find is the te gap rarely goes above 31, and even then, it could either stem from actually having different marginal effects, but also due to players being new and automatically assigned the lowest value of the premier league when we set up the data, meaning if we would've removed matches containing those players, we would've removed these matches.
+
+* Conclusion *
+
+We see that we can't assume that there are diminishing returns on the talent of a player for the the teams.
+If we look at football matches as experiments, and there are no other variables missing to our data, we can assume that there are increasing returns, but even if we don't, we can still raise questions about how the talent of players are affecting the team, and if EA ranks the players in a way which means that for example a 91 rated player in real life is significantly better than a 90 player (in the same league).
+
